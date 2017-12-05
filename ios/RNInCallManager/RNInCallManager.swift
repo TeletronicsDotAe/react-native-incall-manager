@@ -9,6 +9,7 @@ import Foundation
 import UIKit
 import NotificationCenter
 import AVFoundation
+import AudioToolbox
 
 @objc(RNInCallManager)
 class RNInCallManager: NSObject, AVAudioPlayerDelegate {
@@ -19,9 +20,6 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
     var mRingback: AVAudioPlayer!
     var mBusytone: AVAudioPlayer!
 
-    var defaultRingtoneUri: URL!
-    var defaultRingbackUri: URL!
-    var defaultBusytoneUri: URL!
     var bundleRingtoneUri: URL!
     var bundleRingbackUri: URL!
     var bundleBusytoneUri: URL!
@@ -55,6 +53,12 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
     var recordPermission: String!
     var cameraPermission: String!
     var media: String = "audio"
+    var isPlayingNativeRingback: Bool = false
+    var isPlayingNativeBusytone: Bool = false
+
+    // Audio constants
+    private let RINGBACKTONE: SystemSoundID = 1074 // ct-call-waiting.caf	
+    private let BUSYTONE: SystemSoundID = 1070 // ct-busy.caf
 
     private lazy var device: AVCaptureDevice? = { AVCaptureDevice.defaultDevice(withMediaType: AVMediaTypeVideo) }()
 
@@ -562,6 +566,7 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
         // you may rejected by apple when publish app if you use system sound instead of bundled sound.
         NSLog("RNInCallManager.startRingback(): type=\(_ringbackUriType)")
         do {
+            // Check if we are already playing
             if self.mRingback != nil {
                 if self.mRingback.isPlaying {
                     NSLog("RNInCallManager.startRingback(): is already playing")
@@ -570,26 +575,33 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
                     self.stopRingback()
                 }
             }
+            if self.isPlayingNativeRingback {
+
+            }
+
             // ios don't have embedded DTMF tone generator. use system dtmf sound files.
             let ringbackUriType: String = (_ringbackUriType == "_DTMF_" ? "_DEFAULT_" : _ringbackUriType)
             let ringbackUri: URL? = getRingbackUri(ringbackUriType)
-            if ringbackUri == nil {
-                NSLog("RNInCallManager.startRingback(): no available media")
-                return
-            }
-            //self.storeOriginalAudioSetup()
-            self.mRingback = try AVAudioPlayer(contentsOf: ringbackUri!)
-            self.mRingback.delegate = self
-            self.mRingback.numberOfLoops = -1 // you need to stop it explicitly
-            self.mRingback.prepareToPlay()
 
-            //self.audioSessionSetCategory(self.incallAudioCategory, [.DefaultToSpeaker, .AllowBluetooth], #function)
-            self.audioSessionSetCategory(self.incallAudioCategory, nil, #function)
-            self.audioSessionSetMode(self.incallAudioMode, #function)
-            self.mRingback.play()
+            if ringbackUri != nil {
+                NSLog("Playing ringback")
+                //self.storeOriginalAudioSetup()
+                self.mRingback = try AVAudioPlayer(contentsOf: ringbackUri!)
+                self.mRingback.delegate = self
+                self.mRingback.numberOfLoops = -1 // you need to stop it explicitly
+                self.mRingback.prepareToPlay()
+
+                self.audioSessionSetCategory(self.incallAudioCategory, nil, #function)
+                self.audioSessionSetMode(self.incallAudioMode, #function)
+                self.mRingback.play()
+            } else {
+                NSLog("Playing native ringback")
+                isPlayingNativeRingback = true
+                playNativeRingBack()
+            }
         } catch let err {
             NSLog("RNInCallManager.startRingback(): caught error=\(err)")
-        }    
+        }
     }
 
     @objc func stopRingback() -> Void {
@@ -597,9 +609,38 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
             NSLog("RNInCallManager.stopRingback()")
             self.mRingback.stop()
             self.mRingback = nil
-            // --- need to reset route based on config because WebRTC seems will switch audio mode automatically when call established.
-            //self.updateAudioRoute()
         }
+        stopPlayingNativeRingBack()
+    }
+
+    func playNativeRingBack() {
+        DispatchQueue.main.async {
+            AudioServicesPlaySystemSoundWithCompletion(self.RINGBACKTONE) {
+                NSLog("Finished playing system sound")
+                if self.isPlayingNativeRingback {
+                    self.playNativeRingBack();
+                }
+            }
+        }
+    }
+
+    func playNativeBusytone() {
+        DispatchQueue.main.async {
+            AudioServicesPlaySystemSoundWithCompletion(self.BUSYTONE) {
+                NSLog("Finished playing busytone")
+                if self.isPlayingNativeBusytone {
+                    self.playNativeBusytone();
+                }
+            }
+        }
+    }
+
+    func stopPlayingNativeRingBack() {
+        isPlayingNativeRingback = false
+    }
+
+    func stopPlayingNativeBusytone() {
+        isPlayingNativeBusytone = false
     }
 
     // --- _busytoneUriType: never go here with  be empty string.
@@ -619,20 +660,21 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
             // ios don't have embedded DTMF tone generator. use system dtmf sound files.
             let busytoneUriType: String = (_busytoneUriType == "_DTMF_" ? "_DEFAULT_" : _busytoneUriType)
             let busytoneUri: URL? = getBusytoneUri(busytoneUriType)
-            if busytoneUri == nil {
-                NSLog("RNInCallManager.startBusytone(): no available media")
-                return false
-            }
-            //self.storeOriginalAudioSetup()
-            self.mBusytone = try AVAudioPlayer(contentsOf: busytoneUri!)
-            self.mBusytone.delegate = self
-            self.mBusytone.numberOfLoops = 0 // it's part of start(), will stop at stop() 
-            self.mBusytone.prepareToPlay()
 
-            //self.audioSessionSetCategory(self.incallAudioCategory, [.DefaultToSpeaker, .AllowBluetooth], #function)
-            self.audioSessionSetCategory(self.incallAudioCategory, nil, #function)
-            self.audioSessionSetMode(self.incallAudioMode, #function)
-            self.mBusytone.play()
+            if busytoneUri != nil {
+                //self.storeOriginalAudioSetup()
+                self.mBusytone = try AVAudioPlayer(contentsOf: busytoneUri!)
+                self.mBusytone.delegate = self
+                self.mBusytone.numberOfLoops = 0 // it's part of start(), will stop at stop()
+                self.mBusytone.prepareToPlay()
+
+                //self.audioSessionSetCategory(self.incallAudioCategory, [.DefaultToSpeaker, .AllowBluetooth], #function)
+                self.audioSessionSetCategory(self.incallAudioCategory, nil, #function)
+                self.audioSessionSetMode(self.incallAudioMode, #function)
+                self.mBusytone.play()
+            } else {
+                playNativeBusytone()
+            }
         } catch let err {
             NSLog("RNInCallManager.startBusytone(): caught error=\(err)")
             return false
@@ -646,6 +688,8 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
             self.mBusytone.stop()
             self.mBusytone = nil
         }
+
+        stopPlayingNativeBusytone()
     }
 
     // --- ringtoneUriType May be empty
@@ -723,56 +767,46 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
         reject("error_code", "getAudioUriJS() failed", NSError(domain:"getAudioUriJS", code: 0, userInfo: nil))
     }
 
-    func getRingbackUri(_ _type: String) -> URL? {
+    func getRingbackUri(_ type: String) -> URL? {
         let fileBundle: String = "incallmanager_ringback"
         let fileBundleExt: String = "mp3"
-        //let fileSysWithExt: String = "vc~ringing.caf" // --- ringtone of facetine, but can't play it.
-        //let fileSysPath: String = "/System/Library/Audio/UISounds"
-        let fileSysWithExt: String = "Marimba.m4r"
-        let fileSysPath: String = "/Library/Ringtones"
-        let type = (_type == "" || _type == "_DEFAULT_" ? fileSysWithExt : _type) // --- you can't get default user perfrence sound in ios
-        return self.getAudioUri(type, fileBundle, fileBundleExt, fileSysWithExt, fileSysPath, &self.bundleRingbackUri, &self.defaultRingbackUri)
+
+        return self.getAudioUri(type, fileBundle, fileBundleExt, nil, nil)
     }
 
-    func getBusytoneUri(_ _type: String) -> URL? {
+    func getBusytoneUri(_ type: String) -> URL? {
         let fileBundle: String = "incallmanager_busytone"
         let fileBundleExt: String = "mp3"
-        let fileSysWithExt: String = "ct-busy.caf" //ct-congestion.caf
-        let fileSysPath: String = "/System/Library/Audio/UISounds"
-        let type = (_type == "" || _type == "_DEFAULT_" ? fileSysWithExt : _type) // --- you can't get default user perfrence sound in ios
-        return self.getAudioUri(type, fileBundle, fileBundleExt, fileSysWithExt, fileSysPath, &self.bundleBusytoneUri, &self.defaultBusytoneUri)
+
+        return self.getAudioUri(type, fileBundle, fileBundleExt, nil, nil)
     }
 
-    func getRingtoneUri(_ _type: String) -> URL? {
+    func getRingtoneUri(_ type: String) -> URL? {
         let fileBundle: String = "incallmanager_ringtone"
         let fileBundleExt: String = "mp3"
-        let fileSysWithExt: String = "Opening.m4r" //Marimba.m4r
+        let fileSysWithExt: String = "Opening.m4r"
         let fileSysPath: String = "/Library/Ringtones"
-        let type = (_type == "" || _type == "_DEFAULT_" ? fileSysWithExt : _type) // --- you can't get default user perfrence sound in ios
-        return self.getAudioUri(type, fileBundle, fileBundleExt, fileSysWithExt, fileSysPath, &self.bundleRingtoneUri, &self.defaultRingtoneUri)
+
+        return self.getAudioUri(type, fileBundle, fileBundleExt, fileSysWithExt, fileSysPath)
     }
 
-    func getAudioUri(_ _type: String, _ fileBundle: String, _ fileBundleExt: String, _ fileSysWithExt: String, _ fileSysPath: String, _ uriBundle: inout URL!, _ uriDefault: inout URL!) -> URL? {
+    func getAudioUri(_ _type: String, _ fileBundle: String, _ fileBundleExt: String, _ fileSysName: String?, _ fileSysPath: String?) -> URL? {
         var type = _type
         if type == "_BUNDLE_" {
+            var uriBundle = Bundle.main.url(forResource: fileBundle, withExtension: fileBundleExt)
             if uriBundle == nil {
-                uriBundle = Bundle.main.url(forResource: fileBundle, withExtension: fileBundleExt)
-                if uriBundle == nil {
-                    NSLog("RNInCallManager.getAudioUri(): \(fileBundle).\(fileBundleExt) not found in bundle.")
-                    type = fileSysWithExt
-                } else {
-                    return uriBundle
-                }
+                NSLog("RNInCallManager.getAudioUri(): \(fileBundle).\(fileBundleExt) not found in bundle.")
             } else {
                 return uriBundle
             }
         }
         
-        if uriDefault == nil {
-            let target: String = "\(fileSysPath)/\(type)"
-            uriDefault = self.getSysFileUri(target)
+        if let filePath = fileSysPath, let fileName = fileSysName {
+            let target: String = "\(filePath)/\(fileName)"
+            return self.getSysFileUri(target)
         }
-        return uriDefault
+
+        return nil
     }
 
     func getSysFileUri(_ target: String) -> URL? {
@@ -793,12 +827,9 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) -> Void {
         // --- this only called when all loop played. it means, an infinite (numberOfLoops = -1) loop will never into here.
-        //if player.url!.isFileReferenceURL() {
         let filename = player.url?.deletingPathExtension().lastPathComponent
         NSLog("RNInCallManager.audioPlayerDidFinishPlaying(): finished playing: \(filename)")
-        if filename == self.bundleBusytoneUri?.deletingPathExtension().lastPathComponent
-            || filename == self.defaultBusytoneUri?.deletingPathExtension().lastPathComponent {
-            //self.stopBusytone()
+        if filename == "incallmanager_busytone.mp3" {
             NSLog("RNInCallManager.audioPlayerDidFinishPlaying(): busytone finished, invoke stop()")
             self.stop("")
         }
@@ -808,18 +839,6 @@ class RNInCallManager: NSObject, AVAudioPlayerDelegate {
         let filename = player.url?.deletingPathExtension().lastPathComponent
         NSLog("RNInCallManager.audioPlayerDecodeErrorDidOccur(): player=\(filename), error=\(error?.localizedDescription)")
     }
-
-    // --- Deprecated in iOS 8.0.
-    func audioPlayerBeginInterruption(_ player: AVAudioPlayer) -> Void {
-        let filename = player.url?.deletingPathExtension().lastPathComponent
-        NSLog("RNInCallManager.audioPlayerBeginInterruption(): player=\(filename)")
-    }
-
-    // --- Deprecated in iOS 8.0.
-//    func audioPlayerEndInterruption(_ player: AVAudioPlayer) -> Void {
-//        let filename = player.url?.deletingPathExtension().lastPathComponent
-//        NSLog("RNInCallManager.audioPlayerEndInterruption(): player=\(filename)")
-//    }
 
     func debugAudioSession() -> Void {
         let currentRoute: Dictionary <String,String> = ["input": self.audioSession.currentRoute.inputs[0].uid, "output": self.audioSession.currentRoute.outputs[0].uid]
