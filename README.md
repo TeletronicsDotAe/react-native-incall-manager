@@ -121,7 +121,7 @@ Make sure you set swift version to `3.2`: ![swift](https://i.imgur.com/lYubEVt.p
 
   if someone knows a simpler way to set this project up, let me know plz.
 
-#### optional sound files on android
+#### optional sound files on IOS
 
 if you want to use bundled ringtone/ringback/busytone sound instead of system sound 
 
