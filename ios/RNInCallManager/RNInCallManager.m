@@ -365,9 +365,9 @@ RCT_EXPORT_METHOD(stopRingtone)
         [_ringtone stop];
         _ringtone = nil;
         [self restoreOriginalAudioSetup];
-        [self audioSessionSetActive:NO
-                            options:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-                         callerMemo:NSStringFromSelector(_cmd)];
+        // [self audioSessionSetActive:NO
+        //                     options:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+        //                  callerMemo:NSStringFromSelector(_cmd)];
     }
 }
 
