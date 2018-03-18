@@ -309,12 +309,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
     private void stopWiredHeadsetEvent() {
         if (wiredHeadsetReceiver != null) {
             Log.d(TAG, "stopWiredHeadsetEvent()");
-            ReactContext reactContext = getReactApplicationContext();
-            if (reactContext != null) {
-                reactContext.unregisterReceiver(wiredHeadsetReceiver);
-            } else {
-                Log.d(TAG, "stopWiredHeadsetEvent() reactContext is null");
-            }
+            this.unregisterReceiver(this.wiredHeadsetReceiver);
             wiredHeadsetReceiver = null;
         }
     }
@@ -344,12 +339,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
     private void stopNoisyAudioEvent() {
         if (noisyAudioReceiver != null) {
             Log.d(TAG, "stopNoisyAudioEvent()");
-            ReactContext reactContext = getReactApplicationContext();
-            if (reactContext != null) {
-                reactContext.unregisterReceiver(noisyAudioReceiver);
-            } else {
-                Log.d(TAG, "stopNoisyAudioEvent() reactContext is null");
-            }
+            this.unregisterReceiver(this.noisyAudioReceiver);
             noisyAudioReceiver = null;
         }
     }
@@ -416,12 +406,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
     private void stopMediaButtonEvent() {
         if (mediaButtonReceiver != null) {
             Log.d(TAG, "stopMediaButtonEvent()");
-            ReactContext reactContext = getReactApplicationContext();
-            if (reactContext != null) {
-                reactContext.unregisterReceiver(mediaButtonReceiver);
-            } else {
-                Log.d(TAG, "stopMediaButtonEvent() reactContext is null");
-            }
+            this.unregisterReceiver(this.mediaButtonReceiver);
             mediaButtonReceiver = null;
         }
     }
@@ -643,10 +628,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
         startWiredHeadsetEvent();
         startNoisyAudioEvent();
         startMediaButtonEvent();
-        if (!defaultSpeakerOn) {
-            // video, default disable proximity
-            startProximitySensor();
-        }
+        startProximitySensor(); // --- proximity event always enable, but only turn screen off when audio is routing to earpiece.
         setKeepScreenOn(true);
     }
 
@@ -789,7 +771,15 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
         Log.d(TAG, "setForceSpeakerphoneOn() flag: " + flag);
         forceSpeakerOn = flag;
 
-        selectAudioDevice((flag == 1) ? AudioDevice.SPEAKER_PHONE : AudioDevice.NONE); // --- will call updateAudioDeviceState()
+        // --- will call updateAudioDeviceState()
+        // --- Note: in some devices, it may not contains specified route thus will not be effected.
+        if (flag == 1) {
+            selectAudioDevice(AudioDevice.SPEAKER_PHONE);
+        } else if (flag == -1) {
+            selectAudioDevice(AudioDevice.EARPIECE); // --- use the most common earpiece to force `speaker off`
+        } else {
+            selectAudioDevice(AudioDevice.NONE); // --- NONE will follow default route, the default route of `video` call is speaker.
+        }
     }
 
     // --- TODO (zxcpoiu): Implement api to let user choose audio devices
@@ -1676,8 +1666,17 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
     }
 
     /** Helper method for unregistration of an existing receiver. */
-    private void unregisterReceiver(BroadcastReceiver receiver) {
-        getReactApplicationContext().unregisterReceiver(receiver);
+    private void unregisterReceiver(final BroadcastReceiver receiver) {
+        final ReactContext reactContext = this.getReactApplicationContext();
+        if (reactContext != null) {
+            try {
+                reactContext.unregisterReceiver(receiver);
+            } catch (final Exception e) {
+                Log.d(TAG, "unregisterReceiver() failed");
+            }
+        } else {
+            Log.d(TAG, "unregisterReceiver() reactContext is null");
+        }
     }
 
     /** Sets the speaker phone mode. */
